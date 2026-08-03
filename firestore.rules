@@ -1,0 +1,106 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      // Relies on a custom claim set server-side when a doc is added to /admins.
+      // Never trust a client-supplied "isAdmin" field.
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // ---------- users ----------
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      // Users may update only their own non-sensitive profile fields.
+      // status/level/referralCode are server-controlled; block client edits to them.
+      allow update: if isOwner(uid)
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['status', 'level', 'referralCode', 'uid', 'createdAt', 'referredBy']);
+      allow create: if false;  // only Cloud Functions (onUserCreate) may create
+      allow delete: if false;
+    }
+
+    // ---------- wallets ----------
+    match /wallets/{uid} {
+      // Users can READ their own wallet only. No client writes, ever —
+      // all balance changes happen inside Cloud Functions using the Admin SDK,
+      // which bypasses these rules by design.
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if false;
+    }
+
+    // ---------- transactions (immutable ledger) ----------
+    match /transactions/{txId} {
+      allow read: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isAdmin());
+      allow write: if false;  // Cloud Functions only, never client
+    }
+
+    // ---------- games ----------
+    match /games/{gameId} {
+      allow read: if isSignedIn();          // any logged-in user can browse games
+      allow write: if isAdmin();             // only admins manage the catalog
+    }
+
+    // ---------- offers / tasks ----------
+    match /offers/{offerId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ---------- withdrawals ----------
+    match /withdrawals/{withdrawalId} {
+      allow read: if isSignedIn()
+        && (resource.data.uid == request.auth.uid || isAdmin());
+      // Creation happens via callable Cloud Function (requestWithdrawal) so the
+      // pendingWithdrawal hold on the wallet stays consistent with the request.
+      allow create: if false;
+      // Status changes (approve/reject) happen via Cloud Functions only.
+      allow update, delete: if false;
+    }
+
+    // ---------- referrals ----------
+    match /referrals/{referralId} {
+      allow read: if isSignedIn()
+        && (resource.data.referrerUid == request.auth.uid
+            || resource.data.referredUid == request.auth.uid
+            || isAdmin());
+      allow write: if false;   // Cloud Function only
+    }
+
+    // ---------- leaderboard (public read, computed) ----------
+    match /leaderboard/{uid} {
+      allow read: if isSignedIn();
+      allow write: if false;   // scheduled Cloud Function only
+    }
+
+    // ---------- settings ----------
+    match /settings/{docId} {
+      allow read: if isSignedIn();   // app needs coinToCurrencyRate, limits, etc.
+      allow write: if isAdmin();
+    }
+
+    // ---------- admins ----------
+    match /admins/{uid} {
+      // Nobody reads/writes the admins collection from a client at all.
+      // Adding a new admin is a privileged, out-of-band operation (super admin
+      // triggers a callable function that also sets the custom claim).
+      allow read, write: if false;
+    }
+
+    // Default deny — anything not explicitly matched above is blocked.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

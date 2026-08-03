@@ -1,0 +1,23 @@
+{
+  "name": "playverse-functions",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": "20" },
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
+    "deploy": "npm run build && firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "bootstrap:admin": "ts-node scripts/bootstrapFirstAdmin.ts"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.3.1",
+    "firebase-functions": "^5.0.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.3",
+    "ts-node": "^10.9.2",
+    "@types/node": "^20.14.10"
+  }
+}
